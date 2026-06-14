@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14
+> **最后更新**：2026-06-14（Phase 1 跑通环境完成）
 
 ---
 
@@ -191,23 +191,33 @@ git push origin main
 
 ### 5.1 安装
 ```bash
-# 仓库根目录（包名 pyqlib，import qlib；Python 3.8–3.12）
-pip install -e .             # 或 make dev（装齐 dev/lint/docs/test 等 extras）
-make prerequisites           # 编译 Cython 扩展（首次必跑）
+# 仓库根目录（包名 pyqlib，import qlib；本机用 Python 3.12 + 专用 venv）
+python3 -m venv .venv && .venv/bin/pip install -U pip setuptools wheel setuptools_scm
+.venv/bin/pip install -e .   # 装核心 + 自动编译 Cython 扩展（约 2–3 分钟）
 ./scripts/setup-hooks.sh     # 启用 commit 门禁（见 §3.3），每个 clone 一次
 ```
+- 本机已建好 `.venv/`（已 gitignore）。后续命令都用 `.venv/bin/python` / `.venv/bin/qrun`。
+- **⚠️ 必须设 `MLFLOW_ALLOW_FILE_STORE=true`**：新版 mlflow（3.13）把文件型 tracking 后端列为
+  "maintenance mode" 并默认报错，而 qlib 用的正是文件后端。跑 `qrun` 前 export 它，否则在
+  实验初始化处崩。详见 §9.1。
 
 > Lint/格式沿用上游：black（120 列）+ pylint + flake8 + mypy；`make lint` 一把跑。
 > 测试：`cd tests && pytest . -m "not slow"`（见 §7）。
 
 ### 5.2 拉数据 + 跑一个 benchmark（先验证环境通）
 ```bash
-# 美股日线示例数据（上游提供）
-python scripts/get_data.py qlib_data --target_dir ~/.qlib/qlib_data/us_data --region us
-# 跑一个最小 benchmark
-qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
+# 美股日线示例数据（上游提供，~450MB，解压到 ~/.qlib/qlib_data/us_data）
+.venv/bin/python scripts/get_data.py qlib_data --target_dir ~/.qlib/qlib_data/us_data --region us
+# 跑我们的美股 benchmark（见 §5.2 末）
+MLFLOW_ALLOW_FILE_STORE=true .venv/bin/qrun examples/fork/workflow_config_lightgbm_alpha158_us.yaml
 ```
 qlib 通过 `qlib.init(provider_uri=..., region="us")` 指向数据目录；美股 region 已内建（`REG_US`）。
+
+> **美股数据要点**（实测 2026-06-14）：日历 1999-12-31 ~ **2020-11-10**（数据到 2020 年底为止，
+> 配 YAML 的 test 区间别超）；8994 个 symbol；universe 文件有 `sp500.txt` / `nasdaq100.txt` / `all.txt`；
+> 基准指数 symbol 用 **`^GSPC`**（标普500，数据里有；另有 `^ndx` `^dji`、ETF `spy`）。
+> 上游 benchmark 的 YAML 都是 CN（csi300 + 10% 涨跌停 `limit_threshold: 0.095`），**不能直接拿来跑美股**；
+> 我们的美股 config 在 `examples/fork/workflow_config_lightgbm_alpha158_us.yaml`（market=sp500、benchmark=^GSPC、去掉涨跌停）。
 
 ### 5.3 接我们的数据源（Alpha Vantage / Massive-Polygon）
 qlib 数据是**文件式 `.bin`**，外部数据走"collector → CSV → dump_bin"两步（**不改上游**）：
@@ -240,6 +250,8 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 日期 | 定制内容 | 为什么 | 落点（文件） | 是否侵入上游文件 |
 |---|---|---|---|---|
 | 2026-06-14 | 建立 fork 治理脚手架 | 把 TradingAgents 那套 fork 规范移植到 qlib | `FORK.md` `CLAUDE.md` `.githooks/commit-msg` `scripts/setup-hooks.sh` `qlib/custom/__init__.py`（全为新增文件） | 否（纯新增） |
+| 2026-06-14 | 美股 LightGBM/Alpha158 workflow config | 上游 benchmark YAML 全是 CN（csi300+涨跌停），美股跑不了；这是 Phase 1 跑通环境的 config | `examples/fork/workflow_config_lightgbm_alpha158_us.yaml`（新增） | 否（纯新增） |
+| 2026-06-14 | gitignore 加 `.venv/` `mlruns/` | 本机 dev 产物不入库 | `.gitignore`（追加 `[FORK]` 块） | 是（append-only，冲突风险极低） |
 
 <!--
 登记模板：
@@ -282,7 +294,23 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 
 ## 9. 本地运行的已知问题与经验
 
-> （暂空——首次端到端跑通后回填：数据源坑、显存/上下文坑、region 配置坑等。）
+> 首次端到端跑通记录（2026-06-14，US LightGBM/Alpha158，`.venv` + Python 3.12）。
+
+### 9.1 mlflow 文件后端默认报错 → 必须 `MLFLOW_ALLOW_FILE_STORE=true`
+- 现象：`qrun` 在实验初始化处崩，`MlflowException: The filesystem tracking backend ... is in maintenance mode`。
+- 原因：`pip install -e .` 装到 mlflow 3.13（最新），它把文件型 tracking 后端（qlib 默认用的 `./mlruns`）列为维护模式并默认抛错。
+- 解法：跑 `qrun`/工作流前 `export MLFLOW_ALLOW_FILE_STORE=true`（mlflow 自己给的 opt-out）。**这是当前唯一的环境拦路虎**。
+- 备选（更稳，未采用）：把 mlflow 钉到旧版（如 `pip install 'mlflow<3'`）。先用 env 变量，简单。
+
+### 9.2 首跑结果（环境验证用，非策略结论）
+- 流水线完整跑通：数据 → Alpha158（158 因子）→ LGBModel 训练 → IC 分析 → TopkDropout 回测 → 组合报告，全程 < 1 分钟。
+- 信号很弱：`IC≈0.0066`、`Rank IC≈0.0047`；策略**跑输**买入持有标普（excess return 含成本 **-5.2%/年**，benchmark `^GSPC` 同期 +12.1%/年，最大回撤 -38%（含 2020 covid））。
+- **这是预期内的**：用的是上游**为 CN 调的超参** + 默认 Alpha158 + 2017–2020 测试段，目的只是验证环境，不是策略结论。调参/换因子是后续 Phase 3 的事。
+
+### 9.3 无害警告（可忽略）
+- `$close field data contains nan`：sp500 成分里有退市/缺数据的 symbol，回测自动跳过。
+- `load calendar error: freq=day, future=True; return current calendar!`：回测想要"未来日历"，没有就用当前日历，正常。
+- `Gym has been unmaintained ... does not support NumPy 2.0`：本机装的是 numpy 2.4，gym 只在 RL 模块用到，不跑 RL 就无影响（要跑 RL 需按上游 `rl` extra 钉 `numpy<2`）。
 
 ---
 
@@ -294,7 +322,7 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 | Phase | 内容 | 状态 | 验收标准 |
 |---|---|---|---|
 | **0 脚手架** | FORK.md / CLAUDE.md / commit 门禁 / `qlib/custom/` 空包 | ☑ 完成 | 文档就位；`./scripts/setup-hooks.sh` 生效 |
-| **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☐ 未开始 | `qrun` 出回测结果；`pytest -m "not slow"` 基本绿 |
+| **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☑ 完成（2026-06-14） | `qrun examples/fork/...us.yaml` 端到端出回测/组合报告（见 §9.2）；`.venv` + Python 3.12 |
 | **2 接自有数据** | AV / Polygon collector → dump_bin → 美股自有数据集 | ☐ 未开始 | `scripts/data_collector/<vendor>/` 产出 CSV 并 dump 成 `.bin`，qlib 能读 |
 | **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ☐ 未开始 | 自定义类经 `module_path` 跑通一条完整 workflow |
 
