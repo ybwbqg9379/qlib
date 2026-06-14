@@ -97,11 +97,14 @@ class MassiveCollector(BaseCollector):
     # Massive minute history depth depends on plan; default to last ~2 years on free/basic.
     DEFAULT_START_DATETIME_1MIN = pd.Timestamp(datetime.datetime.now() - pd.Timedelta(days=730)).date()
 
+    MAX_RETRIES = 6  # bounded so a persistent 429 / 5xx / network blip can't hang or crash a bulk pull
+
     def __init__(self, save_dir, symbols=None, adjusted=True, **kwargs):
         self._symbols_arg = symbols
         self._adjusted = bool(adjusted)
+        self._key = _api_key()  # cache once (was re-read per page)
         self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {_api_key()}"})
+        self._session.headers.update({"Authorization": f"Bearer {self._key}"})
         self._base = _base_url()
         super().__init__(save_dir=save_dir, **kwargs)
 
@@ -110,6 +113,41 @@ class MassiveCollector(BaseCollector):
 
     def normalize_symbol(self, symbol: str) -> str:
         return str(symbol).strip().upper()
+
+    def _fetch(self, url: str) -> dict:
+        """GET one page with BOUNDED retry on 429 / 5xx / transient network errors.
+
+        Upstream BaseCollector runs get_data under joblib.Parallel WITHOUT a per-symbol
+        try/except, so an unbounded `while: continue` on 429 would hang the whole run and
+        an unhandled 5xx/timeout would crash every symbol in the batch. We retry up to
+        MAX_RETRIES with backoff, then raise — the caller (get_data) turns that into a
+        skipped symbol so one flaky response never kills a bulk pull.
+        """
+        last = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                resp = self._session.get(url, timeout=30)
+            except (requests.Timeout, requests.ConnectionError) as e:
+                last = e
+                wait = min(2**attempt, 30)
+                logger.warning(f"network error ({e}); retry {attempt + 1}/{self.MAX_RETRIES} in {wait}s")
+                time.sleep(wait)
+                continue
+            if resp.status_code == 429:
+                last = "429 rate-limited"
+                wait = min(15 * (attempt + 1), 60)
+                logger.warning(f"429 rate-limited; retry {attempt + 1}/{self.MAX_RETRIES} in {wait}s")
+                time.sleep(wait)
+                continue
+            if resp.status_code >= 500:
+                last = f"server {resp.status_code}"
+                wait = min(2**attempt, 30)
+                logger.warning(f"{last}; retry {attempt + 1}/{self.MAX_RETRIES} in {wait}s")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()  # other 4xx are non-retryable (bad key, bad symbol) → surface
+            return resp.json()
+        raise RuntimeError(f"failed after {self.MAX_RETRIES} retries (last: {last})")
 
     def get_data(
         self, symbol: str, interval: str, start_datetime: pd.Timestamp, end_datetime: pd.Timestamp
@@ -122,17 +160,15 @@ class MassiveCollector(BaseCollector):
             f"?adjusted={'true' if self._adjusted else 'false'}&sort=asc&limit=50000"
         )
         rows = []
-        while url:
-            resp = self._session.get(url, timeout=30)
-            if resp.status_code == 429:  # rate limited → back off and retry same url
-                logger.warning(f"{symbol}: 429 rate-limited, sleeping 15s")
-                time.sleep(15)
-                continue
-            resp.raise_for_status()
-            payload = resp.json()
-            rows.extend(payload.get("results", []) or [])
-            nxt = payload.get("next_url")
-            url = f"{nxt}&apiKey={_api_key()}" if nxt else None  # next_url needs the key re-appended
+        try:
+            while url:
+                payload = self._fetch(url)
+                rows.extend(payload.get("results", []) or [])
+                nxt = payload.get("next_url")
+                url = f"{nxt}&apiKey={self._key}" if nxt else None  # next_url needs the key re-appended
+        except RuntimeError as e:
+            logger.error(f"{symbol}: giving up ({e}); skipping symbol")  # skip, don't crash the bulk run
+            return pd.DataFrame()
         if not rows:
             return pd.DataFrame()
 
