@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14（Phase 3 一轮研究闭环完成：因子→归因(gain/SHAP)→剪枝→重测；当前最优 `Alpha158Custom5` 含成本超额 +15.3%/年）
+> **最后更新**：2026-06-14（Phase 3 研究闭环完成并自我证伪：多种子检验显示单 seed +15% 是运气；6因子与Custom5打平，跨10seed均值超额 +6.9%/+4.1%，方法论=因子看gain/SHAP·业绩看多seed）
 
 ---
 
@@ -301,7 +301,8 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 2026-06-14 | 第一个自定义因子 handler `Alpha158Custom` + workflow | Phase 3 起步：证明 `qlib/custom/` + YAML `module_path` 扩展机制；Alpha158 + 6 个有经济含义的自有因子 | `qlib/custom/data/handler.py`、`qlib/custom/data/__init__.py`、`examples/fork/workflow_config_lightgbm_custom_us_massive.yaml`（全新增） | 否（纯新增） |
 | 2026-06-14 | 单因子 IC 归因脚本 + 剪枝实验 `Alpha158CustomLite` | Phase 3 证伪环节；归因脚本可复用；剪枝实验证伪"单因子 IC 可给树模型剪枝"（§9.7），留档 | `examples/fork/factor_ic_attribution.py`、`Alpha158CustomLite`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom_lite_us_massive.yaml`（全新增） | 否（纯新增） |
 | 2026-06-14 | Gain/SHAP 因子归因脚本 | Phase 3 正确的归因法（替代单因子 IC）；6 因子占 19.5% SHAP，LOTTERY21 双法垫底（§9.8） | `examples/fork/factor_gain_shap_attribution.py`（新增） | 否（纯新增） |
-| 2026-06-14 | gain/SHAP 剪枝版 `Alpha158Custom5`（当前最优） | 只砍 LOTTERY21，验证 gain/SHAP 剪枝胜过 IC 剪枝；超额/IR/回撤全项改善（§9.9） | `Alpha158Custom5`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom5_us_massive.yaml`（新增） | 否（纯新增） |
+| 2026-06-14 | gain/SHAP 剪枝版 `Alpha158Custom5`（默认） | 只砍死因子 LOTTERY21；单 seed 曾显示全项改善（§9.9），多 seed 证伪后定位为"与6因子打平、方差更低" | `Alpha158Custom5`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom5_us_massive.yaml`（新增） | 否（纯新增） |
+| 2026-06-14 | 多种子重测脚本 | 证伪单 seed 业绩；坐实"组合超额单 seed 噪声±10pp，业绩对比须多 seed"（§9.10） | `examples/fork/multiseed_compare.py`（新增） | 否（纯新增） |
 
 <!--
 登记模板：
@@ -437,6 +438,29 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
   **至少无害、很可能有益**（与 IC 剪枝的明确有害相反）；+15% 绝对值勿当真。下一步若要降方差/坐实增益：
   多随机种子或滚动 test 再评估。
 
+### 9.10 多种子重测：+15% 被证伪为运气，单 seed 业绩不可信（Phase 3，2026-06-14）
+> **本节纠正 §9.9**：§9.9 把 `Alpha158Custom5` 单 seed 的 +15.3% 当成"增益"并定其为"当前最优"，
+> 多种子检验后**该结论不成立**——见下。研究记录保留 §9.9 原文 + 此纠正，体现闭环的自我证伪。
+
+- 工具：`examples/fork/multiseed_compare.py`——同一组 10 个 seed 下**配对**跑 6 因子版和 Custom5
+  （数据集各建一次复用，只换 LGBModel 的 `seed`），比较超额(含成本)的**分布**而非单点。
+- **结果**：
+
+  | handler | 超额均值 | 标准差 | 最差 | 最好 |
+  |---|---|---|---|---|
+  | 6 因子 `Alpha158Custom` | **+6.94%** | 10.1pp | -6.2% | +25.4% |
+  | `Alpha158Custom5`（砍 LOTTERY21） | +4.05% | 6.7pp | -2.1% | +18.1% |
+
+  配对差（Custom5−6因子）：均值 **−2.9pp ± 10.4pp**，Custom5 只在 **4/10** seed 上胜 → **裁决：噪声内，无差异**。
+- **结论（重要，覆盖之前所有单 seed 业绩声称）**：
+  1. **单 seed 组合超额噪声极大（±10pp）**。→ §9.6/§9.7/§9.9 里的 +5.7% / +0.4% / +15.3% **在组合层面都不可靠**，
+     §9.9 的 +15.3% 是抽到分布高位的运气，Custom5 实际**并不优于** 6 因子（均值反而略低、但方差更小）。
+  2. **因子取舍仍以 Rank IC + gain/SHAP 为准（它们稳）；组合业绩对比此后一律多 seed。**
+  3. 正面信号：两版**跨 10 seed 均值超额都为正**（+6.9% / +4.1%），比单次幸运可信，但仍是单一 test 段 +
+     公开因子 + A 股超参，**不构成 alpha**；真正稳健性检验 = 滚动/多 test 段（下一步）。
+- **当前最优修正**：6 因子与 Custom5 **统计上打平**。默认用 `Alpha158Custom5`——**不因它赚更多（并没有），
+  而因 LOTTERY21 按所有口径都是死因子、且 Custom5 结果方差更低**（同等收益取低方差）。
+
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
 - **必须 `--include_fields open,high,low,close,volume,...`**：dump_bin 默认把 CSV 里**每一列**都当数值
@@ -455,7 +479,7 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 | **0 脚手架** | FORK.md / CLAUDE.md / commit 门禁 / `qlib/custom/` 空包 | ☑ 完成 | 文档就位；`./scripts/setup-hooks.sh` 生效 |
 | **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☑ 完成（2026-06-14） | `qrun examples/fork/...us.yaml` 端到端出回测/组合报告（见 §9.2）；`.venv` + Python 3.12 |
 | **2 接自有数据** | AV / Massive collector → dump_bin → 美股自有数据集 | ☑ 完成（2026-06-14） | 两个 collector 实测通过；全 sp500 日线 2008–2026 拉好 dump 成 `us_data_massive`；用自有新鲜数据跑通 2021–2026 回测（§9.5）。☐ 选做：批量分钟级、基本面 |
-| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ◐ 进行中（2026-06-14） | ☑ 验收已达成并完成一轮研究闭环：自定义因子经 `module_path` 跑通；归因（单因子 IC→gain/SHAP）→ 剪枝 → 重测。**当前最优 `Alpha158Custom5`**（gain/SHAP 砍 LOTTERY21）含成本超额 +15.3%/IR 0.34/回撤 -37.5%（§9.6–9.9）。☐ 续做：美股调参 / 降方差(多种子·滚动) / 自定义模型 / 自定义策略 |
+| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ◐ 进行中（2026-06-14） | ☑ 验收达成 + 一轮完整研究闭环（含自我证伪）：自定义因子经 `module_path` 跑通；归因 单因子IC→gain/SHAP；剪枝 IC剪枝(崩)→SHAP剪枝；多 seed 检验证伪单 seed +15%。**沉淀的方法论：因子取舍看 Rank IC+gain/SHAP，业绩对比须多 seed**。默认 `Alpha158Custom5`，跨10seed均值超额 +4.1%（6因子 +6.9%，二者打平）（§9.6–9.10）。☐ 续做：滚动/多 test 段稳健性 / 美股调参 / 自定义模型 / 自定义策略 |
 
 ### 10.0 为什么要做这些 Phase（实际意义 — 进来先读这节，别把它当纯任务清单）
 
