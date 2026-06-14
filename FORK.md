@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14（Phase 2 完成：全 S&P500 自有 Massive 数据跑通 2021–2026 回测）
+> **最后更新**：2026-06-14（Phase 3 起步：第一个自定义因子 handler `Alpha158Custom` 跑通，含成本超额 +5.7%/年）
 
 ---
 
@@ -18,7 +18,7 @@
 
 > 这是交接入口——只放**指针**，不复制状态（所以不会过时）。按顺序看三处即可上手：
 >
-> 1. **现在做到哪、下一步做什么** → 看 **§10 路线图状态表**（Phase 0–2 已完成；下一步 = Phase 3 自定义因子/模型/策略）。
+> 1. **现在做到哪、下一步做什么** → 看 **§10 路线图状态表**（Phase 0–2 完成；Phase 3 进行中：第一个自定义因子 handler 已跑通，下一步 = 加更多因子/调参/自定义模型/策略）。
 > 2. **怎么把环境跑起来** → §5.1 激活 `.venv`；跑任何 `qrun` 前先 `export MLFLOW_ALLOW_FILE_STORE=true`（§9.1）。
 > 3. **动手前必读的规矩** → §2 定制规范（扩展不改上游）、§3 commit 门禁（`Fork:` trailer；钩子没启用先 `./scripts/setup-hooks.sh`）。
 >
@@ -298,6 +298,7 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 2026-06-14 | Massive（原 Polygon）数据 collector | 美股主战场,上游无此源;含日线/分钟 | `scripts/data_collector/massive/`（collector.py+README，新增） | 否（纯新增） |
 | 2026-06-14 | Alpha Vantage 数据 collector | 同上,另有复权/基本面 | `scripts/data_collector/alpha_vantage/`（collector.py+README，新增） | 否（纯新增） |
 | 2026-06-14 | API key 占位符模板 | 两个 collector 的 key 入口 | `.env.example`（新增,committed）+ `.env`（gitignored,本机填） | 否（纯新增） |
+| 2026-06-14 | 第一个自定义因子 handler `Alpha158Custom` + workflow | Phase 3 起步：证明 `qlib/custom/` + YAML `module_path` 扩展机制；Alpha158 + 6 个有经济含义的自有因子 | `qlib/custom/data/handler.py`、`qlib/custom/data/__init__.py`、`examples/fork/workflow_config_lightgbm_custom_us_massive.yaml`（全新增） | 否（纯新增） |
 
 <!--
 登记模板：
@@ -368,6 +369,20 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 - **定性同 §9.2**：仍是公开 Alpha158 + 为 CN 调的超参，结果≈市场、非 alpha。意义在于**自有新鲜数据的闭环通了**；
   做出超额是 Phase 3（自有因子/调参）的事。
 
+### 9.6 第一个自定义因子 handler 首跑（Phase 3 起步，2026-06-14）
+- handler：`qlib/custom/data/handler.py::Alpha158Custom` = 继承上游 `Alpha158`，override
+  `get_feature_config()` 追加 6 个**有公开经济含义、且不与 Alpha158 重复**的自有因子
+  （OVERNIGHT 隔夜收益 / MOM12_1 动量(12-1) / HI52W 52周高点 / LOTTERY21 彩票效应 /
+  AMIHUD21 非流动性 / PVOL21 Parkinson 波动）。每个因子的论文出处和"为什么不重复"写在文件头注释。
+- 扩展方式 = **纯新增类 + YAML `module_path` 引用，零改上游**（本 fork 的核心扩展机制首次用于因子）。
+- config：`examples/fork/workflow_config_lightgbm_custom_us_massive.yaml`（与 Phase 2 那份**只差 handler**，
+  便于对照）。同一份自有 Massive 数据、同一段 test(2021–2026)、同一套（仍是 CN 调的）LGBM 超参。
+- **结果 vs Phase 2 纯 Alpha158 基线**：IC 0.0013 → **0.00235**；Rank IC 0.0067；
+  超额收益(含成本) **-0.07%/年 → +5.74%/年**（IR 0.31）；基准 SPY +13.75%/年。最大回撤 -45%（偏高，待治理）。
+- **定性**：研究闭环（想法→因子→qrun→IC/超额→留/弃）首次端到端跑通，且第一版迭代就跑赢基线。
+  但仍是单次回测、IC 量级仍小、超参未为美股调、回撤偏大——把它当"管线/方法已验证"，**不是**已坐实的 alpha。
+  下一步：扩因子、为美股调参、做单因子 IC 归因（看哪几个因子真有贡献）、再考虑自定义模型/策略。
+
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
 - **必须 `--include_fields open,high,low,close,volume,...`**：dump_bin 默认把 CSV 里**每一列**都当数值
@@ -386,7 +401,7 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 | **0 脚手架** | FORK.md / CLAUDE.md / commit 门禁 / `qlib/custom/` 空包 | ☑ 完成 | 文档就位；`./scripts/setup-hooks.sh` 生效 |
 | **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☑ 完成（2026-06-14） | `qrun examples/fork/...us.yaml` 端到端出回测/组合报告（见 §9.2）；`.venv` + Python 3.12 |
 | **2 接自有数据** | AV / Massive collector → dump_bin → 美股自有数据集 | ☑ 完成（2026-06-14） | 两个 collector 实测通过；全 sp500 日线 2008–2026 拉好 dump 成 `us_data_massive`；用自有新鲜数据跑通 2021–2026 回测（§9.5）。☐ 选做：批量分钟级、基本面 |
-| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ☐ 未开始 | 自定义类经 `module_path` 跑通一条完整 workflow |
+| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ◐ 进行中（2026-06-14） | ☑ 验收标准已达成：`Alpha158Custom`（6 自有因子）经 `module_path` 跑通完整 workflow，含成本超额 +5.7%/年（§9.6）。☐ 续做：扩因子 / 美股调参 / 单因子归因 / 自定义模型 / 自定义策略 |
 
 ### 10.0 为什么要做这些 Phase（实际意义 — 进来先读这节，别把它当纯任务清单）
 
