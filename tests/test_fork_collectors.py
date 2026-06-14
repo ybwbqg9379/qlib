@@ -21,6 +21,7 @@ os.environ.setdefault("ALPHA_VANTAGE_API_KEY", "test-key")
 
 from data_collector.massive import collector as mc  # noqa: E402
 from data_collector.alpha_vantage import collector as av  # noqa: E402
+from data_collector.alpha_vantage import fundamentals as avf  # noqa: E402
 
 
 class _Resp:
@@ -124,6 +125,33 @@ def test_massive_normalize_factor_and_change():
     assert (out["factor"] == 1.0).all()  # Massive prices already adjusted -> factor 1
     assert out["change"].iloc[0] != out["change"].iloc[0] or pd.isna(out["change"].iloc[0])  # first NaN
     assert out["change"].iloc[1] == pytest.approx((10.0 - 9.0) / 9.0)  # pct_change
+
+
+def test_fundamentals_period_encoding():
+    # year*100 + quarter (qlib PIT convention); quarter from the fiscal-date-ending month
+    assert avf._period("2019-03-31") == 201901
+    assert avf._period("2019-06-30") == 201902
+    assert avf._period("2019-12-31") == 201904
+    assert avf._period("2020-09-30") == 202003
+
+
+def test_fundamentals_normalize_pit_dedup():
+    n = avf.AVFundamentalsNormalize()
+    # same (field, period) reported twice (restatement) -> keep the EARLIEST date (first availability)
+    raw = pd.DataFrame(
+        {
+            "date": ["2020-05-01", "2020-02-01", "2020-02-01"],
+            "period": [202001, 201904, 201904],
+            "field": ["eps_q", "eps_q", "eps_q"],
+            "value": [1.1, 0.9, 0.9],
+            "symbol": ["AAPL", "AAPL", "AAPL"],
+        }
+    )
+    out = n.normalize(raw)
+    assert list(out.columns) == ["date", "period", "field", "value"]  # symbol dropped for dump_pit
+    assert len(out) == 2  # duplicate (eps_q, 201904) collapsed
+    row = out[out["period"] == 201904].iloc[0]
+    assert row["date"] == "2020-02-01"  # earliest kept
 
 
 def test_av_normalize_factor_from_adjclose():
