@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14（Phase 1 跑通环境完成）
+> **最后更新**：2026-06-14（Phase 1 跑通环境完成；§10.0 补全各 Phase 的实际意义与双 fork 协同）
 
 ---
 
@@ -325,6 +325,36 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 | **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☑ 完成（2026-06-14） | `qrun examples/fork/...us.yaml` 端到端出回测/组合报告（见 §9.2）；`.venv` + Python 3.12 |
 | **2 接自有数据** | AV / Polygon collector → dump_bin → 美股自有数据集 | ☐ 未开始 | `scripts/data_collector/<vendor>/` 产出 CSV 并 dump 成 `.bin`，qlib 能读 |
 | **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ☐ 未开始 | 自定义类经 `module_path` 跑通一条完整 workflow |
+
+### 10.0 为什么要做这些 Phase（实际意义 — 进来先读这节，别把它当纯任务清单）
+
+**先认清 Phase 1 那条 demo 的两处"假"**，正好对应 Phase 2 / 3 要修的东西：
+
+| Phase 1 demo 里 | 真实情况 | 谁来修 |
+|---|---|---|
+| 数据 = 上游 Yahoo 样本，**只到 2020-11-10**，免费数据有复权/缺口/幸存者偏差 | 我们付费买了 **AV + Polygon**，新鲜、干净、point-in-time、有基本面/分钟级 | **Phase 2** |
+| 因子 = 公开 Alpha158，模型 = 为 A 股调的超参 | 公开因子 = **零超额收益**（早被市场套利掉），需要**我们自己的因子/模型** | **Phase 3** |
+
+→ 一句话：**Phase 1 证明"机器能转"，Phase 2 给它加"真燃料"，Phase 3 才是"我们真正要造的东西"。**
+
+**Phase 2（自有数据）的意义：**
+- *功能*：① 能研究**当下市场**（现在的数据停在 2020，回测的是不含 2022 熊市 / 2023–24 AI 牛市 / 加息周期的"古代行情"）；② 数据质量 = 回测可信度（垃圾进垃圾出，付费源才可信）；③ 是"能交易"的前提（数据停在 2020 就永远只能回测，谈不上 paper/实盘）。
+- *战略*：模型是大路货，**数据 + 因子才是护城河**。且这条美股数据管道对**两个 fork 复用**——qlib 和 TradingAgents 都吃同一份 AV/Polygon 数据，做一次两边受益。
+
+**Phase 3（自定义因子/模型/策略）的意义：**
+- *功能*：前面全是基础设施，**Phase 3 才是"做量化研究"本身**。自定义因子 = 我们对"什么预测收益"的假设 = **alpha 来源**；自定义模型/策略 = 建模与仓位/风控的自由度。用公开因子人人平手，用自己的因子才有 edge。
+- *研发*：它搭起一个**可重复的研究迭代闭环**——`想法 → 写成因子 → qrun 回测 → 看 IC/夏普/回撤 → 证伪或保留 → 下一个想法`。靠 `qlib/custom/` + 不改上游的扩展机制，每个新想法 = 加一个文件 + 一份 YAML，几分钟出结果，把"灵感"工业化成"可批量验证的研究"。
+- *战略*：它是**未来 LLM 自动化的插槽**。要让本地 llama.cpp / RD-Agent 路线**自动挖因子**，LLM 生成的因子得有地方插入、有框架自动回测——Phase 3 的脚手架正是 LLM 操作的底座。**Phase 3 = 人工研究循环 + 未来 LLM 自动研究循环 共用的同一套地基。**
+
+**两个 fork 的协同（为什么这套对整个研发有复利）：**
+
+| | qlib（本项目） | TradingAgents（姊妹 fork） |
+|---|---|---|
+| 风格 | **系统化**：全市场因子 + 组合 + 回测 | **判断式**：LLM 像分析师逐票决策 |
+| 共享 | ← **AV/Polygon 美股数据（Phase 2）** → | 同一套数据 |
+| 协同 | Phase 3 的自定义因子/信号可作 TradingAgents agent 的输入工具 | TradingAgents 选候选 → qlib 系统化回测验证 |
+
+→ 终点：把这个 fork 从"能跑微软的 demo"变成"**我们自己的、能持续产出 alpha 研究、并可叠加 LLM 自动化的本地美股平台**"。
 
 ### 设计要求 / 约束
 - **不改上游**：定制全部经 `qlib/custom/` + YAML `module_path` + `scripts/data_collector/<vendor>/`。
