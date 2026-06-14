@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14（Phase 3 起步：第一个自定义因子 handler `Alpha158Custom` 跑通，含成本超额 +5.7%/年）
+> **最后更新**：2026-06-14（Phase 3 一轮研究闭环完成：因子→归因(gain/SHAP)→剪枝→重测；当前最优 `Alpha158Custom5` 含成本超额 +15.3%/年）
 
 ---
 
@@ -301,6 +301,7 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 2026-06-14 | 第一个自定义因子 handler `Alpha158Custom` + workflow | Phase 3 起步：证明 `qlib/custom/` + YAML `module_path` 扩展机制；Alpha158 + 6 个有经济含义的自有因子 | `qlib/custom/data/handler.py`、`qlib/custom/data/__init__.py`、`examples/fork/workflow_config_lightgbm_custom_us_massive.yaml`（全新增） | 否（纯新增） |
 | 2026-06-14 | 单因子 IC 归因脚本 + 剪枝实验 `Alpha158CustomLite` | Phase 3 证伪环节；归因脚本可复用；剪枝实验证伪"单因子 IC 可给树模型剪枝"（§9.7），留档 | `examples/fork/factor_ic_attribution.py`、`Alpha158CustomLite`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom_lite_us_massive.yaml`（全新增） | 否（纯新增） |
 | 2026-06-14 | Gain/SHAP 因子归因脚本 | Phase 3 正确的归因法（替代单因子 IC）；6 因子占 19.5% SHAP，LOTTERY21 双法垫底（§9.8） | `examples/fork/factor_gain_shap_attribution.py`（新增） | 否（纯新增） |
+| 2026-06-14 | gain/SHAP 剪枝版 `Alpha158Custom5`（当前最优） | 只砍 LOTTERY21，验证 gain/SHAP 剪枝胜过 IC 剪枝；超额/IR/回撤全项改善（§9.9） | `Alpha158Custom5`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom5_us_massive.yaml`（新增） | 否（纯新增） |
 
 <!--
 登记模板：
@@ -416,6 +417,26 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 - **caveat**：valid l2 仅从 1.0 微降到 0.9975（best iter 17），整体信号弱；SHAP 占比是弱信号模型内的
   相对重要性、单次划分。方向性结论稳健，绝对数字勿当真。
 
+### 9.9 gain/SHAP 指导的剪枝重测：方法论闭环完成（Phase 3，2026-06-14）
+- `Alpha158Custom5` = 6 因子去掉 LOTTERY21（唯一 gain/SHAP 双垫底者，§9.8），其余全留
+  （PVOL21/OVERNIGHT 单因子 IC 弱但被模型用于交互，§9.7 教训）。config:
+  `examples/fork/workflow_config_lightgbm_custom5_us_massive.yaml`。
+- **三版对照（同数据/同 test 2021–2026/同超参）**：
+
+  | | 6 因子 Custom | 3 因子 Lite（**IC 剪枝**） | 5 因子 Custom5（**SHAP 剪枝**） |
+  |---|---|---|---|
+  | Rank IC | 0.0067 | 0.0073 | 0.0070 |
+  | 超额(含成本) | +5.74% | **+0.38%** | **+15.30%** |
+  | IR | 0.31 | 0.03 | **0.34** |
+  | 最大回撤 | -45.5% | -48.3% | **-37.5%** |
+
+- **闭环结论**：同样是剪枝，**IC 剪枝（误伤交互因子）→ 超额崩盘；gain/SHAP 剪枝（只砍真死因子）→ 全项改善**。
+  坐实：树模型的因子取舍看 gain/SHAP，不看单因子 IC。**当前最优 = `Alpha158Custom5`**。
+- **caveat（重要）**：Rank IC 几乎没变（0.0067→0.0070），底层信号质量基本一致；+5.7%→+15.3% 的跳变
+  **主要是 top-50 组合高方差**（换因子→选票变→这次选得好），不是信号强 3 倍。稳健说法：砍 LOTTERY21
+  **至少无害、很可能有益**（与 IC 剪枝的明确有害相反）；+15% 绝对值勿当真。下一步若要降方差/坐实增益：
+  多随机种子或滚动 test 再评估。
+
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
 - **必须 `--include_fields open,high,low,close,volume,...`**：dump_bin 默认把 CSV 里**每一列**都当数值
@@ -434,7 +455,7 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 | **0 脚手架** | FORK.md / CLAUDE.md / commit 门禁 / `qlib/custom/` 空包 | ☑ 完成 | 文档就位；`./scripts/setup-hooks.sh` 生效 |
 | **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☑ 完成（2026-06-14） | `qrun examples/fork/...us.yaml` 端到端出回测/组合报告（见 §9.2）；`.venv` + Python 3.12 |
 | **2 接自有数据** | AV / Massive collector → dump_bin → 美股自有数据集 | ☑ 完成（2026-06-14） | 两个 collector 实测通过；全 sp500 日线 2008–2026 拉好 dump 成 `us_data_massive`；用自有新鲜数据跑通 2021–2026 回测（§9.5）。☐ 选做：批量分钟级、基本面 |
-| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ◐ 进行中（2026-06-14） | ☑ 验收标准已达成：`Alpha158Custom`（6 自有因子）经 `module_path` 跑通完整 workflow，含成本超额 +5.7%/年（§9.6）。☐ 续做：扩因子 / 美股调参 / 单因子归因 / 自定义模型 / 自定义策略 |
+| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ◐ 进行中（2026-06-14） | ☑ 验收已达成并完成一轮研究闭环：自定义因子经 `module_path` 跑通；归因（单因子 IC→gain/SHAP）→ 剪枝 → 重测。**当前最优 `Alpha158Custom5`**（gain/SHAP 砍 LOTTERY21）含成本超额 +15.3%/IR 0.34/回撤 -37.5%（§9.6–9.9）。☐ 续做：美股调参 / 降方差(多种子·滚动) / 自定义模型 / 自定义策略 |
 
 ### 10.0 为什么要做这些 Phase（实际意义 — 进来先读这节，别把它当纯任务清单）
 

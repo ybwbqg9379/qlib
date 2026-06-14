@@ -82,3 +82,26 @@ class Alpha158CustomLite(Alpha158Custom):
         ]
         names = ["MOM12_1", "HI52W", "AMIHUD21"]
         return fields, names
+
+
+class Alpha158Custom5(Alpha158Custom):
+    """`Alpha158Custom` minus LOTTERY21 — pruned by gain/SHAP attribution.
+
+    Unlike the IC-pruned `Alpha158CustomLite` (which backfired, FORK.md §9.7), this drops
+    ONLY the factor that ranked bottom by BOTH LightGBM gain (#86/164) and TreeSHAP
+    (#49/164) — LOTTERY21 (FORK.md §9.8). PVOL21/OVERNIGHT are kept here because, despite
+    weak univariate IC, the model uses them heavily for interactions (PVOL21 is gain-rank
+    #3). This tests whether gain/SHAP-guided pruning beats IC-guided pruning.
+    """
+
+    @staticmethod
+    def get_custom_feature_config():
+        fields = [
+            "$open/Ref($close, 1) - 1",  # OVERNIGHT
+            "Ref($close, 21)/Ref($close, 252) - 1",  # MOM12_1
+            "$close/Max($close, 252)",  # HI52W
+            "Mean(Abs($change)/($close*$volume+1e-12), 21)",  # AMIHUD21
+            "Std(Log($high/$low), 21)",  # PVOL21
+        ]
+        names = ["OVERNIGHT", "MOM12_1", "HI52W", "AMIHUD21", "PVOL21"]
+        return fields, names
