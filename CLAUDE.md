@@ -5,7 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## This is a fork
 
 This repo is a **self-use fork** of `microsoft/qlib` (`upstream` remote;
-`origin` = `ybwbqg9379/qlib`). **Read `FORK.md` before making changes** — it
+`origin` = `ybwbqg9379/qlib`). **New session? Start at the 「接手指南」 block at the
+top of `FORK.md`** — it points to current progress (§10 roadmap), env activation,
+and the rules. **Read `FORK.md` before making changes** — it
 defines the customization policy: prefer extension over modification, put all our
 own logic in `qlib/custom/` (a new sub-package wired in purely via YAML
 `module_path`, no upstream edits), mark unavoidable upstream edits with `# [FORK]`,
