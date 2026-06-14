@@ -300,6 +300,7 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 2026-06-14 | API key 占位符模板 | 两个 collector 的 key 入口 | `.env.example`（新增,committed）+ `.env`（gitignored,本机填） | 否（纯新增） |
 | 2026-06-14 | 第一个自定义因子 handler `Alpha158Custom` + workflow | Phase 3 起步：证明 `qlib/custom/` + YAML `module_path` 扩展机制；Alpha158 + 6 个有经济含义的自有因子 | `qlib/custom/data/handler.py`、`qlib/custom/data/__init__.py`、`examples/fork/workflow_config_lightgbm_custom_us_massive.yaml`（全新增） | 否（纯新增） |
 | 2026-06-14 | 单因子 IC 归因脚本 + 剪枝实验 `Alpha158CustomLite` | Phase 3 证伪环节；归因脚本可复用；剪枝实验证伪"单因子 IC 可给树模型剪枝"（§9.7），留档 | `examples/fork/factor_ic_attribution.py`、`Alpha158CustomLite`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom_lite_us_massive.yaml`（全新增） | 否（纯新增） |
+| 2026-06-14 | Gain/SHAP 因子归因脚本 | Phase 3 正确的归因法（替代单因子 IC）；6 因子占 19.5% SHAP，LOTTERY21 双法垫底（§9.8） | `examples/fork/factor_gain_shap_attribution.py`（新增） | 否（纯新增） |
 
 <!--
 登记模板：
@@ -399,6 +400,21 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
   3. "模型全样本 IC 升、组合收益降"说明全样本 IC 和被实际交易的头部票不是一回事。
 - **决定**：**保留 6 因子版 `Alpha158Custom` 为当前最优**；`Alpha158CustomLite` 作为已证伪实验留档（调参后可重测）。
   正确的因子归因下一步用**训练后 LightGBM 的 gain/SHAP 特征重要性**（捕捉非线性+交互），而非单因子 IC。
+
+### 9.8 Gain/SHAP 因子归因：正确的归因法（Phase 3，2026-06-14）
+- 工具：`examples/fork/factor_gain_shap_attribution.py`——训练 6 因子模型后读 LightGBM 的
+  **gain** 重要性 + **TreeSHAP**（lightgbm 内置 `pred_contrib`，无需外部 `shap` 库），
+  捕捉单因子 IC 看不到的非线性/交互贡献。报告我们 6 个因子在全部 164 特征里的排名。
+- **结果**（test SHAP 排名 / 占比，满分 164）：
+  MOM12_1 **#1 (7.5%)**、AMIHUD21 **#2 (6.4%)**、HI52W #7、PVOL21 SHAP#11/**gain#3**、
+  OVERNIGHT #15、LOTTERY21 **#49/gain#86（双垫底）**。6 因子合计占 **19.5%** 的 SHAP，
+  而均分公平份额仅 3.7% → 自有因子单位贡献≈平均的 **5.3 倍**，加它们是值的。
+- **坐实 §9.7 的教训**：PVOL21 单因子 IC≈噪声(t=-0.79)，但 gain 排第 3——大量用于交互切分；
+  这正是上次按单因子 IC 砍它导致超额崩盘的原因。**归因要用 gain/SHAP，不能用单因子 IC。**
+- **修正结论**：真正两法都垫底、可安全砍的只有 **LOTTERY21**（上次误砍了 PVOL21/OVERNIGHT）。
+  下一步实验 = 只砍 LOTTERY21 重测，看能否在不伤超额的前提下略简化。
+- **caveat**：valid l2 仅从 1.0 微降到 0.9975（best iter 17），整体信号弱；SHAP 占比是弱信号模型内的
+  相对重要性、单次划分。方向性结论稳健，绝对数字勿当真。
 
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
