@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14（Phase 3 研究闭环完成并自我证伪：多种子检验显示单 seed +15% 是运气；6因子与Custom5打平，跨10seed均值超额 +6.9%/+4.1%，方法论=因子看gain/SHAP·业绩看多seed）
+> **最后更新**：2026-06-14（Phase 3 闭环+多重稳健性检验：滚动回测显示策略正期望但 regime-dependent，7/11年正、均值+11.3%、有2017–19连亏段；非全天候alpha。方法论=因子看gain/SHAP·业绩看多seed·稳健看滚动）
 
 ---
 
@@ -303,6 +303,7 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 2026-06-14 | Gain/SHAP 因子归因脚本 | Phase 3 正确的归因法（替代单因子 IC）；6 因子占 19.5% SHAP，LOTTERY21 双法垫底（§9.8） | `examples/fork/factor_gain_shap_attribution.py`（新增） | 否（纯新增） |
 | 2026-06-14 | gain/SHAP 剪枝版 `Alpha158Custom5`（默认） | 只砍死因子 LOTTERY21；单 seed 曾显示全项改善（§9.9），多 seed 证伪后定位为"与6因子打平、方差更低" | `Alpha158Custom5`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom5_us_massive.yaml`（新增） | 否（纯新增） |
 | 2026-06-14 | 多种子重测脚本 | 证伪单 seed 业绩；坐实"组合超额单 seed 噪声±10pp，业绩对比须多 seed"（§9.10） | `examples/fork/multiseed_compare.py`（新增） | 否（纯新增） |
+| 2026-06-14 | 滚动(walk-forward)回测脚本 | 跨市场状态稳健性检验；结论=正期望(7/11年正,均值+11.3%)但 regime-dependent、非全天候 alpha（§9.11） | `examples/fork/rolling_backtest.py`（新增） | 否（纯新增） |
 
 <!--
 登记模板：
@@ -461,6 +462,22 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 - **当前最优修正**：6 因子与 Custom5 **统计上打平**。默认用 `Alpha158Custom5`——**不因它赚更多（并没有），
   而因 LOTTERY21 按所有口径都是死因子、且 Custom5 结果方差更低**（同等收益取低方差）。
 
+### 9.11 滚动（walk-forward）回测：正期望但强依赖市场状态，非全天候 alpha（Phase 3，2026-06-14）
+- 工具：`examples/fork/rolling_backtest.py`——扩展窗口 walk-forward：test 年 Y∈{2016..2026}，
+  train=[2008,Y-2]/valid=[Y-1]/test=[Y]，**每窗重建 handler**（归一化只在该窗 train 上 fit，无前视）、
+  **重训**，每窗 **3 seed 平均**（§9.10 噪声教训）。handler=默认 `Alpha158Custom5`。
+- **逐年超额(含成本)**：2016 **+17.8%** / 2017 −8.5% / 2018 −9.1% / 2019 −8.3% / 2020 **+42.1%** /
+  2021 +1.0% / 2022 **+7.8%**(SPY −17.8% 熊市跑赢) / 2023 **+33.9%** / 2024 −9.3% / 2025 **+31.8%** / 2026* +25.4%。
+- **裁决**：正超额 **7/11** 年，跨年均值 **+11.3% ± 19.6%**，最差 −9.3%(2024) → **不稳健，集中于特定状态**。
+- **解读（迄今最重要的结论）**：
+  1. 均值确实为正、赢多于输、连 2022 熊市都跑赢——比单段结果可信的正面信号。
+  2. **但离散度极大，且有连续三年亏损段 2017–2019**（平滑大盘动量牛里我们偏动量的因子反跑输），
+     正均值被少数大年（2020/2023/2025）撑起 = "集中于特定状态"。2017 上线会先连亏三年。
+  3. **还原真相**：之前单段 test(2021–2026) 多数年为正，本身是相对有利窗口 → §9.6–9.10 的"+4~7%"也沾 regime 光。
+- **定性**：**不是 alpha，是 regime-dependent 信号**（震荡/轮动/价值年强，平滑大盘动量牛跑输）。
+  提稳健性的方向：① 加**非动量分散化因子**（基本面价值/质量——正好用上 Phase 2 选做的基本面数据）；
+  ② 美股调参；③ regime 择时/降杠杆。
+
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
 - **必须 `--include_fields open,high,low,close,volume,...`**：dump_bin 默认把 CSV 里**每一列**都当数值
@@ -479,7 +496,7 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 | **0 脚手架** | FORK.md / CLAUDE.md / commit 门禁 / `qlib/custom/` 空包 | ☑ 完成 | 文档就位；`./scripts/setup-hooks.sh` 生效 |
 | **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☑ 完成（2026-06-14） | `qrun examples/fork/...us.yaml` 端到端出回测/组合报告（见 §9.2）；`.venv` + Python 3.12 |
 | **2 接自有数据** | AV / Massive collector → dump_bin → 美股自有数据集 | ☑ 完成（2026-06-14） | 两个 collector 实测通过；全 sp500 日线 2008–2026 拉好 dump 成 `us_data_massive`；用自有新鲜数据跑通 2021–2026 回测（§9.5）。☐ 选做：批量分钟级、基本面 |
-| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ◐ 进行中（2026-06-14） | ☑ 验收达成 + 一轮完整研究闭环（含自我证伪）：自定义因子经 `module_path` 跑通；归因 单因子IC→gain/SHAP；剪枝 IC剪枝(崩)→SHAP剪枝；多 seed 检验证伪单 seed +15%。**沉淀的方法论：因子取舍看 Rank IC+gain/SHAP，业绩对比须多 seed**。默认 `Alpha158Custom5`，跨10seed均值超额 +4.1%（6因子 +6.9%，二者打平）（§9.6–9.10）。☐ 续做：滚动/多 test 段稳健性 / 美股调参 / 自定义模型 / 自定义策略 |
+| **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ◐ 进行中（2026-06-14） | ☑ 验收达成 + 一轮完整研究闭环（含自我证伪）：自定义因子经 `module_path` 跑通；归因 单因子IC→gain/SHAP；剪枝 IC剪枝(崩)→SHAP剪枝；多 seed 检验证伪单 seed +15%。**沉淀的方法论：因子取舍看 Rank IC+gain/SHAP，业绩对比须多 seed**。默认 `Alpha158Custom5`，跨10seed均值超额 +4.1%（6因子 +6.9%，二者打平）。☑ 滚动稳健性检验完成：正期望(7/11年正、均值+11.3%)但 regime-dependent、有2017–19连亏段，非全天候 alpha（§9.6–9.11）。☐ 续做：加非动量分散化因子(基本面价值/质量) / 美股调参 / 自定义模型 / 自定义策略 |
 
 ### 10.0 为什么要做这些 Phase（实际意义 — 进来先读这节，别把它当纯任务清单）
 
