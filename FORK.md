@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14（Phase 3 闭环+多重稳健性检验：滚动回测显示策略正期望但 regime-dependent，7/11年正、均值+11.3%、有2017–19连亏段；非全天候alpha。方法论=因子看gain/SHAP·业绩看多seed·稳健看滚动）
+> **最后更新**：2026-06-14（Phase 3 闭环+稳健性检验+自研代码加固：策略正期望但 regime-dependent（7/11年正、均值+11.3%）；并按代码评估分4 commit 修补鲁棒性/测试/架构/扩展性（§9.12）。方法论=因子看gain/SHAP·业绩看多seed·稳健看滚动）
 
 ---
 
@@ -304,6 +304,10 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 2026-06-14 | gain/SHAP 剪枝版 `Alpha158Custom5`（默认） | 只砍死因子 LOTTERY21；单 seed 曾显示全项改善（§9.9），多 seed 证伪后定位为"与6因子打平、方差更低" | `Alpha158Custom5`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom5_us_massive.yaml`（新增） | 否（纯新增） |
 | 2026-06-14 | 多种子重测脚本 | 证伪单 seed 业绩；坐实"组合超额单 seed 噪声±10pp，业绩对比须多 seed"（§9.10） | `examples/fork/multiseed_compare.py`（新增） | 否（纯新增） |
 | 2026-06-14 | 滚动(walk-forward)回测脚本 | 跨市场状态稳健性检验；结论=正期望(7/11年正,均值+11.3%)但 regime-dependent、非全天候 alpha（§9.11） | `examples/fork/rolling_backtest.py`（新增） | 否（纯新增） |
+| 2026-06-14 | Massive collector 带上限重试 | 鲁棒性修复：429 无限循环 + 5xx/超时不重试会挂死/崩溃批量拉取（§9.12 #1） | `scripts/data_collector/massive/collector.py`（改自研文件，非上游） | 否（自研文件） |
+| 2026-06-14 | collector mock 单测（6 个） | 把 collector 鲁棒性从手动冒烟变成可回归验证（§9.12 #2） | `tests/test_fork_collectors.py`（新增） | 否（纯新增） |
+| 2026-06-14 | 抽共享评估库 `_eval.py` | 消除 multiseed/rolling 评估逻辑重复，行为零变化（复现 +0.2539）（§9.12 #3） | `examples/fork/_eval.py`（新增）+ `multiseed_compare.py`/`rolling_backtest.py`（改自研脚本） | 否（自研文件） |
+| 2026-06-14 | 因子改注册表 `CUSTOM_FACTORS` | 加因子=加一行；为未来 LLM 自动挖因子铺底座；行为零变化（§9.12 #4） | `qlib/custom/data/handler.py`（改自研文件） | 否（自研文件） |
 
 <!--
 登记模板：
@@ -477,6 +481,24 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 - **定性**：**不是 alpha，是 regime-dependent 信号**（震荡/轮动/价值年强，平滑大盘动量牛跑输）。
   提稳健性的方向：① 加**非动量分散化因子**（基本面价值/质量——正好用上 Phase 2 选做的基本面数据）；
   ② 美股调参；③ regime 择时/降杠杆。
+
+### 9.12 自研代码加固（架构/鲁棒性/可维护性/扩展性，2026-06-14）
+> 对 ~940 行自研 Python 做了一次代码评估后，按优先级分 4 个 commit 修补。**全程零改上游**；
+> 两个重构（#3/#4）均验证行为不变，故不影响 §9.6–9.11 的结论。
+
+1. **🔴 鲁棒性（Massive collector）**：原 429 是无限 `while: continue`（持续限速会挂死），5xx/超时直接
+   `raise_for_status()` 不重试；而上游 `BaseCollector` 在 `joblib.Parallel` 下**无单票 try/except**，
+   一次坏响应会拖死/崩溃整批拉取。→ 新增 `_fetch()` 带上限重试（`MAX_RETRIES=6`，退避）覆盖
+   429/5xx/网络错误，最终失败则**跳过该票而非崩批**；key 改为只读一次。
+2. **🟠 可维护性（测试空白）**：自研面原本零自动化测试。→ `tests/test_fork_collectors.py`（6 个 mock 单测，
+   无网络）锁住：symbol 解析、AV 月份分页、Massive OHLC 解析+分页+「重试到上限即跳过」、normalize 的
+   `factor/change` 约定。（顺带：`.venv` 装了 `pytest`。）
+3. **🟡 架构（脚本重复）**：multiseed/rolling 重复「建数据→按 seed 训练→TopkDropout 回测→算超额」。
+   → 抽 `examples/fork/_eval.py`（`load_cfg/build_dataset/train_predict/backtest_excess`），两脚本改用之；
+   冒烟精确复现 6 因子 seed0 = +0.2539，**行为零变化**。
+4. **🟢 扩展性（因子硬编码）**：因子原是各子类里重复的字符串列表。→ 统一为 `CUSTOM_FACTORS = {名字:(表达式,论据)}`
+   注册表，handler 变体只声明 `FACTORS` 名单。加因子=加一行；也是 §10.0「LLM 自动挖因子」的插入点。
+   三个 handler 的因子配置逐字不变。
 
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
