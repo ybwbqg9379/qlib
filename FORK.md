@@ -299,6 +299,7 @@ qrun <workflow_config.yaml>            # 标准工作流入口（qlib/cli/run.py
 | 2026-06-14 | Alpha Vantage 数据 collector | 同上,另有复权/基本面 | `scripts/data_collector/alpha_vantage/`（collector.py+README，新增） | 否（纯新增） |
 | 2026-06-14 | API key 占位符模板 | 两个 collector 的 key 入口 | `.env.example`（新增,committed）+ `.env`（gitignored,本机填） | 否（纯新增） |
 | 2026-06-14 | 第一个自定义因子 handler `Alpha158Custom` + workflow | Phase 3 起步：证明 `qlib/custom/` + YAML `module_path` 扩展机制；Alpha158 + 6 个有经济含义的自有因子 | `qlib/custom/data/handler.py`、`qlib/custom/data/__init__.py`、`examples/fork/workflow_config_lightgbm_custom_us_massive.yaml`（全新增） | 否（纯新增） |
+| 2026-06-14 | 单因子 IC 归因脚本 + 剪枝实验 `Alpha158CustomLite` | Phase 3 证伪环节；归因脚本可复用；剪枝实验证伪"单因子 IC 可给树模型剪枝"（§9.7），留档 | `examples/fork/factor_ic_attribution.py`、`Alpha158CustomLite`（handler.py 内）、`examples/fork/workflow_config_lightgbm_custom_lite_us_massive.yaml`（全新增） | 否（纯新增） |
 
 <!--
 登记模板：
@@ -382,6 +383,22 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 - **定性**：研究闭环（想法→因子→qrun→IC/超额→留/弃）首次端到端跑通，且第一版迭代就跑赢基线。
   但仍是单次回测、IC 量级仍小、超参未为美股调、回撤偏大——把它当"管线/方法已验证"，**不是**已坐实的 alpha。
   下一步：扩因子、为美股调参、做单因子 IC 归因（看哪几个因子真有贡献）、再考虑自定义模型/策略。
+
+### 9.7 单因子 IC 归因 + 剪枝实验：一个被证伪的假设（Phase 3，2026-06-14）
+- **归因**（`examples/fork/factor_ic_attribution.py`，逐日横截面 RankIC，test 2021–2026）：
+  MOM12_1 `+0.018 t=3.0`（唯一干净显著）、HI52W `+0.012 t=1.8`、AMIHUD21 `-0.010 t=-2.1`
+  （显著但方向与教科书 Amihud 相反——大盘股池里"较不流动"成分股这段跑输）、
+  OVERNIGHT/PVOL21/LOTTERY21 `|t|<1.3`≈噪声。
+- **假设**：砍掉 3 个"噪声"因子（→ `Alpha158CustomLite`，只留 MOM12_1/HI52W/AMIHUD21）应能稳超额、降回撤。
+- **结果（被证伪）**：精简版**模型 IC 反升**（0.0024→0.0034）但**组合超额(含成本)从 +5.74% 崩到 +0.38%**，
+  IR 0.31→0.03，回撤 -45%→-48%（更差）。
+- **教训**（重要，写下来免得重蹈）：
+  1. **单因子 IC ≠ 因子在非线性树模型里的边际贡献**。PVOL21/LOTTERY21 线性/秩 IC≈0，却给
+     LightGBM 提供了**交互/条件信号**（如"动量有效，除非高波动"）。用单因子 IC 给 GBM 剪枝是错方法。
+  2. 回测超额由 top-50 头部票主导、方差极大，+5.7% 与 +0.4% 都是单次点估计，差异含大量噪声。
+  3. "模型全样本 IC 升、组合收益降"说明全样本 IC 和被实际交易的头部票不是一回事。
+- **决定**：**保留 6 因子版 `Alpha158Custom` 为当前最优**；`Alpha158CustomLite` 作为已证伪实验留档（调参后可重测）。
+  正确的因子归因下一步用**训练后 LightGBM 的 gain/SHAP 特征重要性**（捕捉非线性+交互），而非单因子 IC。
 
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。

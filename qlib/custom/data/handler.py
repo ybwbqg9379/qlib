@@ -59,3 +59,26 @@ class Alpha158Custom(Alpha158):
         base_fields, base_names = super().get_feature_config()
         cust_fields, cust_names = self.get_custom_feature_config()
         return base_fields + cust_fields, base_names + cust_names
+
+
+class Alpha158CustomLite(Alpha158Custom):
+    """Pruned `Alpha158Custom`: only the factors that survived IC attribution.
+
+    `examples/fork/factor_ic_attribution.py` (test 2021-2026, market=all) showed that
+    of the 6 custom factors only the momentum pair and illiquidity carry reliable
+    signal, while PVOL21 / LOTTERY21 / OVERNIGHT were noise (|t|<1.3). Dropping the
+    noise factors aims to keep the excess return while reducing drawdown. Kept:
+        MOM12_1   RankIC +0.018  t=+3.0   (winner)
+        HI52W     RankIC +0.012  t=+1.8   (momentum family)
+        AMIHUD21  RankIC -0.010  t=-2.1   (significant; LightGBM uses the negative sign)
+    """
+
+    @staticmethod
+    def get_custom_feature_config():
+        fields = [
+            "Ref($close, 21)/Ref($close, 252) - 1",  # MOM12_1
+            "$close/Max($close, 252)",  # HI52W
+            "Mean(Abs($change)/($close*$volume+1e-12), 21)",  # AMIHUD21
+        ]
+        names = ["MOM12_1", "HI52W", "AMIHUD21"]
+        return fields, names
