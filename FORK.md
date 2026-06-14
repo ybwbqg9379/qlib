@@ -10,7 +10,7 @@
 > **姊妹文档**：本机工作站手册见 `~/CLAUDE.md`；本仓库 agent 入口见根目录 `CLAUDE.md`。
 > 本 fork 的体例与命名沿用我们另一个 fork [`TradingAgents`](https://github.com/ybwbqg9379/TradingAgents) 的 `FORK.md`。
 >
-> **最后更新**：2026-06-14（Phase 2 起步：Massive/Alpha Vantage collector 建成并端到端实测）
+> **最后更新**：2026-06-14（Phase 2 完成：全 S&P500 自有 Massive 数据跑通 2021–2026 回测）
 
 ---
 
@@ -251,6 +251,9 @@ python ../../dump_bin.py dump_all --data_path ~/.qlib/stock_data/massive/norm_1d
 ```
 分钟级：三步都换 `--interval 1min` + dump 用 `--freq 1min`（AV 1min 按月分页、注意限速）。
 
+> **Massive 是无限套餐**：可随便调用——不用 `--delay`，`--max_workers 16` 并发拉，
+> 直接拉全 sp500 + 长历史 + 分钟级都没关系。AV 才需要省着用（免费 ~25 req/day）。
+
 > **实测（2026-06-14）**：两个 collector 都端到端跑通——AAPL/MSFT 2024 日线 download→normalize→dump→
 > `D.features` 读回价格正确；AV 的 `factor`（=adjclose/close）随分红正确变化。两条踩坑（dump 用
 > `--data_path` 不是 `--csv_path`；必须 `--include_fields`）已写进 README 与 §9.4。
@@ -342,6 +345,16 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 - `load calendar error: freq=day, future=True; return current calendar!`：回测想要"未来日历"，没有就用当前日历，正常。
 - `Gym has been unmaintained ... does not support NumPy 2.0`：本机装的是 numpy 2.4，gym 只在 RL 模块用到，不跑 RL 就无影响（要跑 RL 需按上游 `rl` extra 钉 `numpy<2`）。
 
+### 9.5 自有数据首跑（Phase 2 收尾，2026-06-14）
+- 用 Massive 拉全 S&P500（universe 文件 746 符号 → 734 个有数据；ABS/BS/DJ 等老退市票 Massive 无数据，正常跳过），
+  日线 2008-01-02 ~ **2026-06-12**，无限套餐 `--max_workers 16 --delay 0`，**约 30 秒拉完**。
+- dump 成 `~/.qlib/qlib_data/us_data_massive`（734 instruments，日历到 2026-06-12）。
+- 跑 `examples/fork/workflow_config_lightgbm_alpha158_us_massive.yaml`（market=all、benchmark=SPY、test=2021–2026）：
+  完整闭环通。benchmark SPY 年化 +13.75%（最大回撤 -27%）；策略超额含成本 ≈ **-0.07%/年**（基本追平 SPY），
+  不含成本 +0.9%/年；IC≈0.0013。
+- **定性同 §9.2**：仍是公开 Alpha158 + 为 CN 调的超参，结果≈市场、非 alpha。意义在于**自有新鲜数据的闭环通了**；
+  做出超额是 Phase 3（自有因子/调参）的事。
+
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
 - **必须 `--include_fields open,high,low,close,volume,...`**：dump_bin 默认把 CSV 里**每一列**都当数值
@@ -359,7 +372,7 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 |---|---|---|---|
 | **0 脚手架** | FORK.md / CLAUDE.md / commit 门禁 / `qlib/custom/` 空包 | ☑ 完成 | 文档就位；`./scripts/setup-hooks.sh` 生效 |
 | **1 跑通环境** | 装好 + 拉美股示例数据 + 跑一个 benchmark | ☑ 完成（2026-06-14） | `qrun examples/fork/...us.yaml` 端到端出回测/组合报告（见 §9.2）；`.venv` + Python 3.12 |
-| **2 接自有数据** | AV / Massive collector → dump_bin → 美股自有数据集 | ◐ 进行中（2026-06-14 collector 建成并实测） | ☑ 两个 collector download→normalize→dump→`D.features` 读回实测通过；☐ 待做：批量拉全 sp500 + 跑一条用自有数据的 workflow |
+| **2 接自有数据** | AV / Massive collector → dump_bin → 美股自有数据集 | ☑ 完成（2026-06-14） | 两个 collector 实测通过；全 sp500 日线 2008–2026 拉好 dump 成 `us_data_massive`；用自有新鲜数据跑通 2021–2026 回测（§9.5）。☐ 选做：批量分钟级、基本面 |
 | **3 自定义因子/模型/策略** | 在 `qlib/custom/` 写我们自己的 handler/model/strategy + YAML | ☐ 未开始 | 自定义类经 `module_path` 跑通一条完整 workflow |
 
 ### 10.0 为什么要做这些 Phase（实际意义 — 进来先读这节，别把它当纯任务清单）
