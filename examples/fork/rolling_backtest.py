@@ -15,6 +15,7 @@
 #   MLFLOW_ALLOW_FILE_STORE=true .venv/bin/python examples/fork/rolling_backtest.py
 
 import os
+import sys
 
 import numpy as np
 import pandas as pd
@@ -23,7 +24,8 @@ import qlib
 from _eval import load_cfg, build_dataset, train_predict, backtest_excess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG = os.path.join(HERE, "workflow_config_lightgbm_custom5_us_massive.yaml")
+# optional CLI arg = workflow config path (default = the Custom5 default handler)
+CFG = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "workflow_config_lightgbm_custom5_us_massive.yaml")
 TEST_YEARS = list(range(2016, 2027))  # 2016..2026 (2026 is partial, to 2026-06-01)
 SEEDS = [0, 1, 2]
 DATA_START = "2008-01-01"

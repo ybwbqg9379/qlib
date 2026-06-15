@@ -512,6 +512,17 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
   **两个源的并发策略相反，别套用。**
 - 注：这次没中途重启（BaseCollector 默认重头来，会丢已拉进度），让它带着罚睡跑完；数据正确性不受影响。
 
+### 9.14 基本面 PIT 管线打通（Phase 3，2026-06-14）
+- 全 S&P500 基本面拉好：489 个有数据的 instrument（其余 ETF/非个股跳过），23.5 万行，
+  7 字段（eps/revenue/grossprofit/netincome/equity/assets/shares），覆盖 ~2007Q4–2026Q1。
+- `normalize_data` → `dump_pit` 成功，PIT `.bin` 落在 `us_data_massive/financial/<symbol>/`（和价格 `.bin` 并存）。
+- **dump_pit 两个坑**：① CLI 参数名是 `--csv_path` / `--freq`（不是 dump_bin 的 `--data_path`/`--interval`），
+  且 `dump` 是方法、要放在构造参数**之后**：`dump_pit.py --csv_path .. --qlib_dir .. --freq quarterly dump`。
+  ② **季频会给字段名再加 `_q` 后缀**：我们的 `eps_q` → 落盘 `eps_q_q`，故表达式里引用为 **`P($$eps_q_q)`**。
+- **PIT 因子表达式**：必须用 `P(...)` 包裹 PIT 引用（`$$`），可与日频 `$close` 混算（P 把季频对齐到日历，
+  且只看"截至当日已公告"的值，无前视）。实测：AAPL 2023末 TTM 盈利收益率 3.17%、ROE 0.37，数值正确。
+  PIT 不能用裸 `D.features(freq='day')` 查 `$$x`，必须 `P($$x)`。
+
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
 - **必须 `--include_fields open,high,low,close,volume,...`**：dump_bin 默认把 CSV 里**每一列**都当数值
