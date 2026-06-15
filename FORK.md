@@ -500,6 +500,17 @@ qrun examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
    注册表，handler 变体只声明 `FACTORS` 名单。加因子=加一行；也是 §10.0「LLM 自动挖因子」的插入点。
    三个 handler 的因子配置逐字不变。
 
+### 9.13 AV 大批量拉取：用单线程节流，别靠并发撞限速（2026-06-14 实测）
+- 现象：拉全 S&P500 基本面用 `--max_workers 4`，日志里 80+ 次 `AV throttle`，预计耗时从 ~30 分钟
+  膨胀到 **~1 小时 45 分**。
+- 原因：AV $49.99 档限速是 **75 请求/分钟（无每日上限）**。并发 4 线程 × 每票 3 个端点，瞬时请求
+  超过 75/min → 每次触发，我们的 `_get` 重试逻辑就**罚睡 60 秒**（AV 的 `Note/Information` 软限速）。
+  并发不但没加速，反而因为反复撞限速 + 60s 罚睡而**更慢**。
+- **正确姿势**：大批量拉 AV 用 **`--max_workers 1` + 每次请求间小延迟**（节流到 ~70/min，卡在上限之下），
+  完全避开 60s 罚睡，净速度更快、更稳。Massive 是无限套餐才适合 `--max_workers 16`（§5.3）——
+  **两个源的并发策略相反，别套用。**
+- 注：这次没中途重启（BaseCollector 默认重头来，会丢已拉进度），让它带着罚睡跑完；数据正确性不受影响。
+
 ### 9.4 dump_bin 自有数据的两个坑（Phase 2 实测）
 - **参数名是 `--data_path`，不是 `--csv_path`**（上游 yahoo README 写法易误导，给错就只打印 help）。
 - **必须 `--include_fields open,high,low,close,volume,...`**：dump_bin 默认把 CSV 里**每一列**都当数值
