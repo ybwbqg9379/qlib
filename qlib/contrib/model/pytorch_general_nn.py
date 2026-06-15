@@ -272,6 +272,10 @@ class GeneralPTNN(Model):
             shuffle=True,
             num_workers=self.n_jobs,
             drop_last=True,
+            # [FORK] reuse workers across epochs instead of re-fork()-ing n_jobs of them
+            # every epoch — the per-epoch respawn intermittently deadlocks in a container
+            # (fork-after-threads on qlib's mmap data). See FORK.md §6.
+            persistent_workers=self.n_jobs > 0,
         )
         valid_loader = DataLoader(
             ConcatDataset(dl_valid, wl_valid),
@@ -279,6 +283,7 @@ class GeneralPTNN(Model):
             shuffle=False,
             num_workers=self.n_jobs,
             drop_last=True,
+            persistent_workers=self.n_jobs > 0,  # [FORK] see above / FORK.md §6
         )
         del dl_train, dl_valid, wl_train, wl_valid
 
@@ -351,7 +356,12 @@ class GeneralPTNN(Model):
             index = dl_test.index
             dl_test = dl_test.values
 
-        test_loader = DataLoader(dl_test, batch_size=self.batch_size, num_workers=self.n_jobs)
+        test_loader = DataLoader(
+            dl_test,
+            batch_size=self.batch_size,
+            num_workers=self.n_jobs,
+            persistent_workers=self.n_jobs > 0,  # [FORK] avoid per-epoch worker re-fork deadlock; FORK.md §6
+        )
         self.dnn_model.eval()
         preds = []
 
